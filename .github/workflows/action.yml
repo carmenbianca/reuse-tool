@@ -9,4 +9,5 @@ jobs:
     - uses: actions/checkout@master
     - name: REUSE Compliance Check
       uses: fsfe/reuse-action@master
-      cmd: '--include-submodules lint'
+      with:
+        cmd: '--include-submodules lint'
