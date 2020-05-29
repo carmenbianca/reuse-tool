@@ -5,6 +5,7 @@
 name: Verify latest tag
 
 on:
+  push:
   schedule:
     - cron: "0 9 * * *"
 
