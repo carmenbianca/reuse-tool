@@ -282,7 +282,7 @@ def test_find_and_replace_keep_shebang():
     it.
     """
     spdx_info = SpdxInfo(
-        {"GPL-3.0-or-later"}, {"SPDX" "-FileCopyrightText: Jane Doe"}
+        {"GPL-3.0-or-later"}, {"SPDX" "-FileCopyrightText: John Doe"}
     )
     text = cleandoc(
         """
@@ -298,7 +298,7 @@ def test_find_and_replace_keep_shebang():
         #!/usr/bin/env python3
 
         # spdx-FileCopyrightText: Jane Doe
-        # spdx-FileCopyrightText: Jane Doe
+        # spdx-FileCopyrightText: John Doe
         #
         # spdx-License-Identifier: GPL-3.0-or-later
 
