@@ -274,6 +274,13 @@ def test_all_files_pijul_ignored_contains_newline(pijul_repository):
     assert Path("hello\nworld.pyc").absolute() not in project.all_files()
 
 
+def test_all_files_reuse_toml_ignored(empty_directory):
+    """REUSE.toml is ignored."""
+    (empty_directory / "REUSE.toml").write_text("version = 1")
+    project = Project.from_directory(empty_directory)
+    assert not list(project.all_files())
+
+
 def test_reuse_info_of_file_does_not_exist(fake_repository):
     """Raise FileNotFoundError when asking for the REUSE info of a file that
     does not exist.
