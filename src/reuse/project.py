@@ -17,7 +17,15 @@ import warnings
 from collections import defaultdict
 from gettext import gettext as _
 from pathlib import Path
-from typing import DefaultDict, Dict, Iterator, List, NamedTuple, Optional, Type
+from typing import (
+    DefaultDict,
+    Dict,
+    Generator,
+    List,
+    NamedTuple,
+    Optional,
+    Type,
+)
 
 from binaryornot.check import is_binary
 
@@ -157,59 +165,20 @@ class Project:
 
         return project
 
-    def all_files(self, directory: Optional[StrPath] = None) -> Iterator[Path]:
-        """Yield all files in *directory* and its subdirectories.
-
-        The files that are not yielded are:
-
-        - Files ignored by VCS (e.g., see .gitignore)
-
-        - Files/directories matching IGNORE_*_PATTERNS.
+    def all_files(
+        self, directory: Optional[StrPath] = None
+    ) -> Generator[Path, None, None]:
+        """Yield all Covered Files in *directory* and its subdirectories
+        according to the REUSE Specification.
         """
         if directory is None:
             directory = self.root
-        directory = Path(directory)
-
-        for root_str, dirs, files in os.walk(directory):
-            root = Path(root_str)
-            _LOGGER.debug("currently walking in '%s'", root)
-
-            # Don't walk ignored directories
-            for dir_ in list(dirs):
-                the_dir = root / dir_
-                if self._is_path_ignored(the_dir):
-                    _LOGGER.debug("ignoring '%s'", the_dir)
-                    dirs.remove(dir_)
-                elif the_dir.is_symlink():
-                    _LOGGER.debug("skipping symlink '%s'", the_dir)
-                    dirs.remove(dir_)
-                elif (
-                    not self.include_submodules
-                    and self.vcs_strategy.is_submodule(the_dir)
-                ):
-                    _LOGGER.info(
-                        "ignoring '%s' because it is a submodule", the_dir
-                    )
-                    dirs.remove(dir_)
-
-            # Filter files.
-            for file_ in files:
-                the_file = root / file_
-                if self._is_path_ignored(the_file):
-                    _LOGGER.debug("ignoring '%s'", the_file)
-                    continue
-                if the_file.is_symlink():
-                    _LOGGER.debug("skipping symlink '%s'", the_file)
-                    continue
-                # Suppressing this error because I simply don't want to deal
-                # with that here.
-                with contextlib.suppress(OSError):
-                    if the_file.stat().st_size == 0:
-                        _LOGGER.debug("skipping 0-sized file '%s'", the_file)
-                        continue
-
-                _LOGGER.debug("yielding '%s'", the_file)
-                yield the_file
+        return all_files(
+            directory,
+            include_submodules=self.include_submodules,
+            include_meson_subprojects=self.include_meson_subprojects,
+            vcs_strategy=self.vcs_strategy,
+        )
 
     def reuse_info_of(self, path: StrPath) -> List[ReuseInfo]:
         """Return REUSE info of *path*.
@@ -353,29 +322,6 @@ class Project:
             candidate = GlobalLicensingFound(root, NestedReuseTOML)
         return candidate
 
-    def _is_path_ignored(self, path: Path) -> bool:
-        """Is *path* ignored by some mechanism?"""
-        name = path.name
-        parent_parts = path.parent.parts
-        parent_dir = parent_parts[-1] if len(parent_parts) > 0 else ""
-        if path.is_file():
-            for pattern in _IGNORE_FILE_PATTERNS:
-                if pattern.match(name):
-                    return True
-        elif path.is_dir():
-            for pattern in _IGNORE_DIR_PATTERNS:
-                if pattern.match(name):
-                    return True
-            if not self.include_meson_subprojects:
-                for pattern in _IGNORE_MESON_PARENT_DIR_PATTERNS:
-                    if pattern.match(parent_dir):
-                        return True
-
-        if self.vcs_strategy.is_ignored(path):
-            return True
-
-        return False
-
     def _identifier_of_license(self, path: Path) -> str:
         """Figure out the SPDX License identifier of a license given its path.
         The name of the path (minus its extension) should be a valid SPDX
@@ -485,3 +431,98 @@ class Project:
             ).format(root)
         )
         return VCSStrategyNone(root)
+
+
+def is_path_ignored(
+    path: Path,
+    include_submodules: bool = False,
+    include_meson_subprojects: bool = False,
+    vcs_strategy: Optional[VCSStrategy] = None,
+) -> bool:
+    """Is *path* ignored by some mechanism?"""
+    # pylint: disable=too-many-return-statements,too-many-branches
+    name = path.name
+    parent_parts = path.parent.parts
+    parent_dir = parent_parts[-1] if len(parent_parts) > 0 else ""
+
+    if path.is_symlink():
+        _LOGGER.debug("skipping symlink '%s'", path)
+        return True
+
+    if path.is_file():
+        for pattern in _IGNORE_FILE_PATTERNS:
+            if pattern.match(name):
+                return True
+        # Suppressing this error because I simply don't want to deal
+        # with that here.
+        with contextlib.suppress(OSError):
+            if path.stat().st_size == 0:
+                _LOGGER.debug("skipping 0-sized file '%s'", path)
+                return True
+
+    elif path.is_dir():
+        for pattern in _IGNORE_DIR_PATTERNS:
+            if pattern.match(name):
+                return True
+        if not include_meson_subprojects:
+            for pattern in _IGNORE_MESON_PARENT_DIR_PATTERNS:
+                if pattern.match(parent_dir):
+                    _LOGGER.info(
+                        "ignoring '%s' because it is a Meson subproject", path
+                    )
+                    return True
+        if (
+            not include_submodules
+            and vcs_strategy
+            and vcs_strategy.is_submodule(path)
+        ):
+            _LOGGER.info("ignoring '%s' because it is a submodule", path)
+            return True
+
+    if vcs_strategy and vcs_strategy.is_ignored(path):
+        return True
+
+    return False
+
+
+def all_files(
+    directory: StrPath,
+    include_submodules: bool = False,
+    include_meson_subprojects: bool = False,
+    vcs_strategy: Optional[VCSStrategy] = None,
+) -> Generator[Path, None, None]:
+    """Yield all Covered Files in *directory* and its subdirectories according
+    to the REUSE Specification.
+    """
+    directory = Path(directory)
+
+    for root_str, dirs, files in os.walk(directory):
+        root = Path(root_str)
+        _LOGGER.debug("currently walking in '%s'", root)
+
+        # Don't walk ignored directories
+        for dir_ in list(dirs):
+            the_dir = root / dir_
+            if is_path_ignored(
+                the_dir,
+                include_submodules=include_submodules,
+                include_meson_subprojects=include_meson_subprojects,
+                vcs_strategy=vcs_strategy,
+            ):
+                _LOGGER.debug("ignoring '%s'", the_dir)
+                dirs.remove(dir_)
+
+        # Filter files.
+        for file_ in files:
+            the_file = root / file_
+            if is_path_ignored(
+                the_file,
+                include_submodules=include_submodules,
+                include_meson_subprojects=include_meson_subprojects,
+                vcs_strategy=vcs_strategy,
+            ):
+                _LOGGER.debug("ignoring '%s'", the_file)
+                continue
+
+            _LOGGER.debug("yielding '%s'", the_file)
+            yield the_file
